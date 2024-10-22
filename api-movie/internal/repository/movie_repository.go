@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"api-movie/cmd/app/models"
+	"api-movie/internal/models"
 	"database/sql"
 )
 

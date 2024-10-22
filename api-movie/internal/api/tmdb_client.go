@@ -1,7 +1,7 @@
 package api
 
 import (
-	"api-movie/cmd/app/models"
+	"api-movie/internal/models"
 	"encoding/json"
 	"fmt"
 	"net/http"

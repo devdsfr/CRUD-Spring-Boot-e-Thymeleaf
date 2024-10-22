@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 )
 
 // Movie representa um filme
@@ -12,23 +15,19 @@ type Movie struct {
 	Year  int    `json:"year"`
 }
 
-// Armazenamento em memória para exemplificação
-var movies = []Movie{
-	{ID: "1", Title: "The Matrix", Year: 1999},
-	{ID: "2", Title: "Inception", Year: 2010},
+var db *sql.DB
+
+func SetDB(database *sql.DB) {
+	db = database
 }
 
-// Handler para o endpoint /movies
+// Handler para /movies (GET e POST)
 func MoviesHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		getMovies(w, r)
 	case http.MethodPost:
 		createMovie(w, r)
-	case http.MethodPut:
-		updateMovie(w, r)
-	case http.MethodDelete:
-		deleteMovie(w, r)
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -36,10 +35,82 @@ func MoviesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Handler para /movies/{id} (GET, PUT e DELETE)
+func MovieHandler(w http.ResponseWriter, r *http.Request) {
+	// Extrair ID da URL
+	id, err := extractID(r.URL.Path)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "ID inválido"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		getMovieByID(w, r, id)
+	case http.MethodPut:
+		updateMovie(w, r, id)
+	case http.MethodDelete:
+		deleteMovie(w, r, id)
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Método não suportado"})
+	}
+}
+
+// Extrai o ID da URL /movies/{id}
+func extractID(path string) (int, error) {
+	var id int
+	n, err := fmt.Sscanf(path, "/movies/%d", &id)
+	if err != nil || n != 1 {
+		return 0, fmt.Errorf("ID inválido")
+	}
+	return id, nil
+}
+
 // GET /movies
 func getMovies(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, title, year FROM movies")
+	if err != nil {
+		http.Error(w, "Erro ao buscar filmes", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var movies []Movie
+	for rows.Next() {
+		var movie Movie
+		err := rows.Scan(&movie.ID, &movie.Title, &movie.Year)
+		if err != nil {
+			http.Error(w, "Erro ao escanear dados", http.StatusInternalServerError)
+			return
+		}
+		movies = append(movies, movie)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(movies)
+}
+
+// GET /movies/{id}
+func getMovieByID(w http.ResponseWriter, r *http.Request, id int) {
+	var movie Movie
+	err := db.QueryRow("SELECT id, title, year FROM movies WHERE id = ?", id).Scan(&movie.ID, &movie.Title, &movie.Year)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Filme não encontrado"})
+			return
+		}
+		http.Error(w, "Erro ao buscar o filme", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(movie)
 }
 
 // POST /movies
@@ -52,17 +123,29 @@ func createMovie(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Dados inválidos"})
 		return
 	}
-	// Adicionar ID de forma simplificada
-	newMovie.ID = string(len(movies) + 1)
-	movies = append(movies, newMovie)
+
+	// Inserir no banco de dados
+	result, err := db.Exec("INSERT INTO movies (title, year) VALUES (?, ?)", newMovie.Title, newMovie.Year)
+	if err != nil {
+		http.Error(w, "Erro ao criar o filme", http.StatusInternalServerError)
+		return
+	}
+
+	lastInsertID, err := result.LastInsertId()
+	if err != nil {
+		http.Error(w, "Erro ao obter ID do filme", http.StatusInternalServerError)
+		return
+	}
+
+	newMovie.ID = strconv.FormatInt(lastInsertID, 10)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(newMovie)
 }
 
-// PUT /movies
-func updateMovie(w http.ResponseWriter, r *http.Request) {
+// PUT /movies/{id}
+func updateMovie(w http.ResponseWriter, r *http.Request, id int) {
 	var updatedMovie Movie
 	err := json.NewDecoder(r.Body).Decode(&updatedMovie)
 	if err != nil {
@@ -72,43 +155,51 @@ func updateMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for i, movie := range movies {
-		if movie.ID == updatedMovie.ID {
-			movies[i].Title = updatedMovie.Title
-			movies[i].Year = updatedMovie.Year
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(movies[i])
-			return
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]string{"error": "Filme não encontrado"})
-}
-
-// DELETE /movies?id={id}
-func deleteMovie(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "ID é necessário"})
+	// Atualizar no banco de dados
+	result, err := db.Exec("UPDATE movies SET title = ?, year = ? WHERE id = ?", updatedMovie.Title, updatedMovie.Year, id)
+	if err != nil {
+		http.Error(w, "Erro ao atualizar o filme", http.StatusInternalServerError)
 		return
 	}
 
-	for i, movie := range movies {
-		if movie.ID == id {
-			movies = append(movies[:i], movies[i+1:]...)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "Erro ao verificar atualização", http.StatusInternalServerError)
+		return
+	}
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"message": "Filme deletado com sucesso"})
-			return
-		}
+	if rowsAffected == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Filme não encontrado"})
+		return
+	}
+
+	// Buscar o filme atualizado
+	getMovieByID(w, r, id)
+}
+
+// DELETE /movies/{id}
+func deleteMovie(w http.ResponseWriter, r *http.Request, id int) {
+	result, err := db.Exec("DELETE FROM movies WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, "Erro ao deletar o filme", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "Erro ao verificar deleção", http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Filme não encontrado"})
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]string{"error": "Filme não encontrado"})
+	json.NewEncoder(w).Encode(map[string]string{"message": "Filme deletado com sucesso"})
 }
