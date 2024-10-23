@@ -11,9 +11,6 @@ import (
 	"os"
 )
 
-const apiKey = "98cf6e1c64f9167cc7ee0ea8b6b4779b" // Substitua pela sua chave de API do TMDb
-const tmdbURL = "https://api.themoviedb.org/3/movie/popular?api_key=" + apiKey
-
 var db *sql.DB
 
 func main() {
@@ -68,4 +65,5 @@ func main() {
 	if err != nil {
 		log.Fatalf("Erro ao iniciar o servidor: %v", err)
 	}
+
 }

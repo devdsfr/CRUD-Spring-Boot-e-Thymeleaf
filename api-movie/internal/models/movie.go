@@ -1,9 +1,14 @@
 package models
 
+// Movie representa os dados do filme
 type Movie struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	ReleaseDate string `json:"release_date"`
-	// Adicione outros campos conforme necessário
+	Adult            bool    `json:"adult"`
+	OriginalLanguage string  `json:"original_language"`
+	Overview         string  `json:"overview"`
+	Popularity       float64 `json:"popularity"`
+}
+
+// APIResponse representa a estrutura da resposta da API
+type APIResponse struct {
+	Results []Movie `json:"results"`
 }

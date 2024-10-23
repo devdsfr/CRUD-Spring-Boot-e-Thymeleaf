@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	service "api-movie/internal/services"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,11 +9,17 @@ import (
 	"strconv"
 )
 
+const apiKey = "98cf6e1c64f9167cc7ee0ea8b6b4779b" // Substitua pela sua chave de API do TMDb
+
 // Movie representa um filme
 type Movie struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Year  int    `json:"year"`
+	ID               string  `json:"id"`
+	Title            string  `json:"title"`
+	Year             int     `json:"year"`
+	Adult            bool    `json:"adult"`
+	OriginalLanguage string  `json:"original_language"`
+	Overview         string  `json:"overview"`
+	Popularity       float64 `json:"popularity"`
 }
 
 var db *sql.DB
@@ -115,6 +122,15 @@ func getMovieByID(w http.ResponseWriter, r *http.Request, id int) {
 
 // POST /movies
 func createMovie(w http.ResponseWriter, r *http.Request) {
+	httpClient := &http.Client{}
+
+	// Cria uma nova instância do cliente TMDB
+	tmdbClient := service.NewTMDBClient(apiKey, httpClient)
+	movieService := service.NewMovieService(tmdbClient)
+
+	// Imprime os detalhes dos filmes
+	//movieService.GetMovieDetails("Inception")
+
 	var newMovie Movie
 	err := json.NewDecoder(r.Body).Decode(&newMovie)
 	if err != nil {
@@ -124,8 +140,29 @@ func createMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Inserir no banco de dados
-	result, err := db.Exec("INSERT INTO movies (title, year) VALUES (?, ?)", newMovie.Title, newMovie.Year)
+	// Buscar detalhes do filme na API do TMDB
+	movieDetails, err := movieService.GetMovieDetails(newMovie.Title)
+	if err != nil {
+		http.Error(w, "Erro ao buscar detalhes do filme na API", http.StatusInternalServerError)
+		return
+	}
+
+	// Preencher os novos campos com os dados da API
+	newMovie.Adult = movieDetails.Adult
+	newMovie.OriginalLanguage = movieDetails.OriginalLanguage
+	newMovie.Overview = movieDetails.Overview
+	newMovie.Popularity = movieDetails.Popularity
+
+	// Inserir no banco de dados com os novos campos
+	result, err := db.Exec(
+		"INSERT INTO movies ("+
+			"title, year, adult, original_language, overview, popularity) VALUES (?, ?, ?, ?, ?, ?)",
+		newMovie.Title,
+		newMovie.Year,
+		newMovie.Adult,
+		newMovie.OriginalLanguage,
+		newMovie.Overview,
+		newMovie.Popularity)
 	if err != nil {
 		http.Error(w, "Erro ao criar o filme", http.StatusInternalServerError)
 		return
